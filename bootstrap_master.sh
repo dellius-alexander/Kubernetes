@@ -231,12 +231,16 @@ printf "\n\n${RED}--Printing join token...${NC}\n\n"
 ${KUBEADM} token create --print-join-command
 wait $!
 
-#
+# Kubeadm config 
 ${KUBECTL} --kubeconfig=${__KUBECONFIG__} get cm kubeadm-config  \
 -n kube-system -o yaml > kubeadm-config.yaml
-#
+# Kube root ca
 ${KUBECTL} --kubeconfig=${__KUBECONFIG__}  get configmaps kube-root-ca.crt \
--o yaml > kubeconfigmap.yaml
+-o yaml > kubeadm-configmap.yaml
+
+# kubectl get configMap kubeadm-config -o yaml --namespace=kube-system > kubeadm-config.yaml 
+# kubeadm config print init-defaults >> kubeadm-config.yaml 
+# kubeadm config print join-defaults >> kubeadm-config.yaml 
 return 0
 }     # End of init_cluster
 ###############################################################################
