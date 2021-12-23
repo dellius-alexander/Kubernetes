@@ -130,9 +130,6 @@ __FELIX_VXLANMTU__=
 __SERVICEACCOUNT_TOKEN__=
 __WAIT_FOR_DATASTORE__=
 __USER_AUTH__=
-~
-~
-"k8s.env" 0L, 0C
 ```
 
 </div>

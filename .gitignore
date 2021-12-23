@@ -20,3 +20,5 @@ server.csr
 server.key
 kubeadm-config.yaml
 kubeconfigmap.yaml
+init.py
+init_os.sh

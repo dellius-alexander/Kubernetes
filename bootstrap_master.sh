@@ -211,6 +211,7 @@ if [[ -f $(find ~+ -type f -name 'metrics-ca-config.yaml') ]]; then
      wait $!
 
 else
+${KUBECTL} --kubeconfig=${__KUBECONFIG__} taint nodes --all node-role.kubernetes.io/master-
 #####################################################################
 # Standard
 # Metrics Server can be installed either directly from YAML manifest or via the 
@@ -373,8 +374,6 @@ setup, reset or teardown the master node: ";
     fi
 done
 
-    ## Check the input command
-in=$(check_env "${INPUT}" "You entered: ")
     ## Check if command is valid
 if [[ "${INPUT}" =~ ^(reset|RESET)$ ]]; then
     reset
