@@ -1,0 +1,22 @@
+# Ignore Directories
+
+.vscode
+cert/
+# Ignore Files
+.scratch
+**/config.example
+typha.yaml
+**/k8s.env
+calico-kubeconfig
+hosts.conf
+metrics-ca-config.yaml
+*.env
+*.conf
+ca.crt
+ca.key
+ca.srl
+server.crt
+server.csr
+server.key
+kubeadm-config.yaml
+kubeconfigmap.yaml
