@@ -1,3 +1,4 @@
+
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -116,10 +117,6 @@ metadata:
   name: metrics-server
   namespace: kube-system
 spec:
-  tolerations:  # added for master
-  - key: node-role.kubernetes.io/master
-    effect: NoSchedule
-  terminationGracePeriodSeconds: 30
   selector:
     matchLabels:
       k8s-app: metrics-server
@@ -128,20 +125,38 @@ spec:
       maxUnavailable: 0
   template:
     metadata:
-      labels:cc
+      labels:
         k8s-app: metrics-server
     spec:
       serviceAccountName: metrics-server
       containers:
       - name: metrics-server
-        image: k8s.gcr.io/metrics-server/metrics-server:v0.4.2
+        image: k8s.gcr.io/metrics-server/metrics-server:v0.5.2
         imagePullPolicy: IfNotPresent
         args:
           - --kubelet-insecure-tls    # Needed for single node cluster
-          - --cert-dir=/tmp
+          - --cert-dir=/cert
           - --secure-port=4443
-          - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+          - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname
           - --kubelet-use-node-status-port
+          - --metric-resolution=15s
+          # # USE WHEN --kubelet-insecure-tls is FALSE
+          # - --kubeconfig=/cert/kubeconfig
+          # - --metric-resolution=15s
+          # - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname
+          # - --kubelet-use-node-status-port 
+          # - --kubelet-certificate-authority=/cert/ca.crt
+          # - --kubelet-client-certificate=/cert/client.crt
+          # - --kubelet-client-key=/cert/client.key
+          # - --bind-address=0.0.0.0
+          # - --cert-dir=/cert
+          # - --secure-port=4443
+          # - --authentication-kubeconfig=/cert/kubeconfig
+          # - --requestheader-client-ca-file=/cert/client.crt
+          # - --requestheader-allowed-names=aggregator
+          # - --requestheader-extra-headers-prefix=X-Remote-Extra-
+          # - --requestheader-group-headers=X-Remote-Group
+          # - --requestheader-username-headers=X-Remote-User
         livenessProbe:
           failureThreshold: 3
           httpGet:
@@ -149,13 +164,6 @@ spec:
             port: https
             scheme: HTTPS
           periodSeconds: 10
-        resources:
-          requests:
-            cpu: 100m
-            memory: 300Mi
-          limits:
-            cpu: 500m
-            memory: 2048Mi
         ports:
         - containerPort: 4443
           name: https
@@ -166,21 +174,45 @@ spec:
             path: /readyz
             port: https
             scheme: HTTPS
+          initialDelaySeconds: 20
           periodSeconds: 10
+        resources:
+          requests:
+            cpu: 100m
+            memory: 300Mi
+          limits:
+            cpu: 500m
+            memory: 2048Mi
         securityContext:
           readOnlyRootFilesystem: true
           runAsNonRoot: true
           runAsUser: 1000
         volumeMounts:
-        - mountPath: /tmp
-          name: tmp-dir
+        - mountPath: /cert
+          name: cert-dir
       nodeSelector:
         kubernetes.io/os: linux
       priorityClassName: system-cluster-critical
       volumes:
-      - emptyDir: {}
-        name: tmp-dir
-        
+      - name: cert-dir
+        configMap:
+          name: extension-apiserver-authentication-reader
+          items:
+          - key: apiserver.crt
+            path: apiserver.crt
+          - key: apiserver.key
+            path: apiserver.key
+          - key: kubeconfig
+            path: kubeconfig
+          - key: ca.crt
+            path: ca.crt
+          - key: client.crt
+            path: client.crt
+          - key: client.key
+            path: client.key
+      hostAliases:
+      - ip: "10.0.2.129" 
+
 ---
 apiVersion: apiregistration.k8s.io/v1
 kind: APIService
@@ -197,3 +229,4 @@ spec:
     namespace: kube-system
   version: v1beta1
   versionPriority: 100
+

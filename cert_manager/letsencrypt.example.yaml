@@ -9,11 +9,11 @@ spec:
     # You must replace this email address with your own.
     # Let's Encrypt will use this to contact you about expiring
     # certificates, and issues related to your account.
-    email: dellius.alexander@gmail.com
+    email: <your account email address>
     server: https://acme-staging-v02.api.letsencrypt.org/directory
     privateKeySecretRef:
       # Secret resource used to store the account's private key.
-      name: dellius-app-tls
+      name: dellius-app-ca-tls
     # Add a single challenge solver, HTTP01 using nginx
     solvers:
     - http01:
@@ -21,7 +21,8 @@ spec:
           class: nginx
     - selector:
         dnsNames:
-        - '*.dellius.app'
+        - "<your dns names>"
+        - "<listed like this>"
 
 ---
 

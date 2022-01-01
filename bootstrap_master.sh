@@ -2,7 +2,7 @@
 set -e
 ###############################################################################
 ## PARAMETERS: [ start | stop | reset ]
-INPUT=${1:-"RESET"}
+INPUT=${@}
 ###############################################################################
 ###############################################################################
     # Verify kubelet present on host
@@ -113,6 +113,8 @@ firewall-cmd --zone=public --add-port=4/tcp --permanent
 firewall-cmd --zone=public --add-port=4789/tcp --permanent
     # Calico networking with Typha enabled      Typha agent hosts       Incoming        TCP 5473 (default)
 firewall-cmd --zone=public --add-port=5473/tcp --permanent
+    # Used by: self, Control plane
+firewall-cmd --zone=public --add-port=30000-32767/tcp --permanent
     # Reload firewall
 firewall-cmd --reload
     # List ports
@@ -125,6 +127,37 @@ wait $!
 
 return 0;
 }   # End of firewall_rules
+###############################################################################
+###############################################################################
+# Create k8s ssl certificate key pair
+__create_k8s_ssl()
+{
+#export $(cat cert_manager.env | grep -v '#' | awk '/=/ {print $1}')
+# Generate a ca.key with 2048bit:
+COMMON_NAMES=${@}
+CERT_MANAGER=$(find -type d -name 'cert_manager')
+echo "CERT-MANAGER: ${CERT_MANAGER}"
+echo "Common Name(s):"  ${COMMON_NAMES}
+openssl genrsa -out "${CERT_MANAGER}/cert/ca.key" 2048 && \
+# According to the ca.key generate a ca.crt (use -days to set the certificate 
+# effective time):
+openssl req -x509 -new -nodes -key "${CERT_MANAGER}/cert/ca.key" \
+    -subj "/CN=${COMMON_NAMES}" \
+    -days 365 -out "${CERT_MANAGER}/cert/ca.crt" && \
+# Generate a server.key with 2048bit:
+openssl genrsa -out "${CERT_MANAGER}/cert/server.key" 2048 && \
+# Generate the certificate signing request based on the config file:
+openssl req -new -key "${CERT_MANAGER}/cert/server.key" \
+    -out "${CERT_MANAGER}/cert/server.csr" \
+    -config "${CERT_MANAGER}/csr.conf" && \
+# Generate the server certificate using the ca.key, ca.crt and server.csr:
+openssl x509 -req -in "${CERT_MANAGER}/cert/server.csr" \
+    -CA "${CERT_MANAGER}/cert/ca.crt" -CAkey "${CERT_MANAGER}/cert/ca.key" \
+    -CAcreateserial -out "${CERT_MANAGER}/cert/server.crt" -days 10000 \
+    -extensions v3_ext -extfile "${CERT_MANAGER}/csr.conf" && \
+# View the certificate:
+openssl x509  -noout -text -in "${CERT_MANAGER}/cert/server.crt"
+}
 ###############################################################################
 ###############################################################################
 #########################     TEARDOWN CLUSTER     ############################
@@ -183,64 +216,99 @@ return 0;
 ###############################################################################
 init_cluster() {
 ###############################################################################
+    __create_k8s_ssl "${__HOSTNAME__}" "${__APISERVER_ADVERTISE_ADDRESS__}"
+    CERT_MANAGER=$(find -type d -name 'cert_manager')
+    echo "CERT-MANAGER: ${CERT_MANAGER}"
     # On kmaster
-    # Initialize Kubernetes Cluster
-${KUBEADM} init --apiserver-advertise-address=${__APISERVER_ADVERTISE_ADDRESS__} \
---pod-network-cidr=${__POD_NETWORK_CIDR__}
-wait $!
+    # Initialize Kubernetes Cluster     # apiserver advertise address     # pod network cidr
+    ${KUBEADM} init --cert-dir=/etc/kubernetes/pki \
+    --certificate-key=/etc/kubernetes/pki/ca.key \
+    --control-plane-endpoint="${__MASTER_NODE__}" \
+    --apiserver-bind-port="${__KUBERNETES_SERVICE_PORT__}" \
+    --apiserver-advertise-address="${__APISERVER_ADVERTISE_ADDRESS__}" \
+    --apiserver-cert-extra-sans="${__MASTER_NODE__}","${__APISERVER_ADVERTISE_ADDRESS__}" \
+    --pod-network-cidr="${__POD_NETWORK_CIDR__}"
+
+    wait $!
+
+    # View the certificate:
+    openssl x509  -noout -text -in "/etc/kubernetes/pki/server.crt"
 
     # Setup KUBECONFIG file:
-mkdir -p ${__KUBECONFIG_DIRECTORY__}
-cp -i /etc/kubernetes/admin.conf  ${__KUBECONFIG_DIRECTORY__}/config
-chown ${__USER__}:${__USER__}  ${__KUBECONFIG_DIRECTORY__}/config
-wait $!
+    mkdir -p ${__KUBECONFIG_DIRECTORY__} 
+    cp -i /etc/kubernetes/admin.conf  ${__KUBECONFIG_DIRECTORY__}/config
+    chown ${__USER__}:${__USER__}  ${__KUBECONFIG_DIRECTORY__}/config
+    wait $!
 
     # Deploy Calico network
     # Source: https://docs.projectcalico.org/v3.14/manifests/calico.yaml
     # Modify the config map as needed:
-printf "\n\n${RED}--Deploying Calico Networking...${NC}\n\n"
-#${KUBECTL} --kubeconfig=${__KUBECONFIG__} create -f $(find ~+ -type f -name 'calico.yaml')
-${KUBECTL} --kubeconfig=${__KUBECONFIG__} create -f https://docs.projectcalico.org/manifests/calico.yaml
-wait $!
-
+    printf "\n\n${RED}--Deploying Calico Networking...${NC}\n\n"
+    #${KUBECTL} --kubeconfig=${__KUBECONFIG__} create -f $(find ~+ -type f -name 'calico.yaml')
+    curl -fsSLo ./calico/calico.yaml https://docs.projectcalico.org/manifests/calico.yaml &2>/dev/null
+    ${KUBECTL} --kubeconfig=${__KUBECONFIG__} create -f ./calico/calico.yaml
+    wait $!
+    # Copy pki files to cert_manager/cert/ and change permissions
+    cp /etc/kubernetes/pki/* ./cert_manager/cert/ -r
+    chown -R ${__USER__}:${__USER__} ./cert_manager
     # Metric Server
-if [[ -f $(find ~+ -type f -name 'metrics-ca-config.yaml') ]]; then
-     printf "\n\n${RED}--Deploying Metric Server Daemonset...${NC}\n\n"
-     ${KUBECTL} --kubeconfig=${__KUBECONFIG__}  apply -f $(find ~+ -type f -name 'metrics-ca-config.yaml')
-     ${KUBECTL} --kubeconfig=${__KUBECONFIG__}  apply -f $(find ~+ -type f -name 'metrics-server.yaml')
-     wait $!
+    ${KUBECTL} --kubeconfig=${__KUBECONFIG__} create configmap extension-apiserver-authentication-reader -n kube-system  \
+    --from-file=apiserver.crt=/etc/kubernetes/pki/apiserver.crt \
+    --from-file=apiserver.key=/etc/kubernetes/pki/apiserver.key \
+    --from-file=ca.crt=/etc/kubernetes/pki/ca.crt \
+    --from-file=client.crt=/etc/kubernetes/pki/apiserver-kubelet-client.crt \
+    --from-file=client.key=/etc/kubernetes/pki/apiserver-kubelet-client.key \
+    --from-file=kubeconfig=/home/dalexander/.kube/config -o yaml > extension-apiserver-authentication.yaml  # create configmap extension-apiserver-authentication-reader
+    #
+    CONFIG_MAP=$(find ~+ -type f -name 'extension-apiserver-authentication')
+    #
+        ${KUBECTL} --kubeconfig=${__KUBECONFIG__} taint nodes --all \
+        node-role.kubernetes.io/master-
+        #
+    if [[ -f "${CONFIG_MAP}" ]]; then
+        printf "\n\n${RED}--Deploying Metric Server Daemonset...${NC}\n\n"
+        ${KUBECTL} --kubeconfig=${__KUBECONFIG__}  apply -f \
+        ${CONFIG_MAP}
+        ${KUBECTL} --kubeconfig=${__KUBECONFIG__}  apply -f \
+        $(find ~+ -type f -name 'metrics-server.yaml')
+        wait $!
 
-else
-${KUBECTL} --kubeconfig=${__KUBECONFIG__} taint nodes --all node-role.kubernetes.io/master-
-#####################################################################
-# Standard
-# Metrics Server can be installed either directly from YAML manifest or via the 
-# official Helm chart. To install the latest Metrics Server release from the 
-# components.yaml manifest, run the following command.
-${KUBECTL} --kubeconfig=${__KUBECONFIG__}  apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
-#####################################################################
-# High Availability
-# Metrics Server can be installed in high availability mode directly from a YAML 
-# manifest or via the official Helm chart by setting the replicas value greater 
-# than 1. To install the latest Metrics Server release in high availability mode 
-# from the high-availability.yaml manifest, run the following command.
-    # ${KUBECTL} --kubeconfig=${__KUBECONFIG__}  apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability.yaml
-fi
+    else
+        # ${KUBECTL} --kubeconfig=${__KUBECONFIG__} taint nodes --all \
+        #     node-role.kubernetes.io/master-
+        #####################################################################
+        # Standard
+        # Metrics Server can be installed either directly from YAML manifest or via the 
+        # official Helm chart. To install the latest Metrics Server release from the 
+        # components.yaml manifest, run the following command.
+        # https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+        ${KUBECTL} --kubeconfig=${__KUBECONFIG__}  apply -f \
+        $(find ~+ -type f -name 'metrics-server.yaml')
+        #####################################################################
+        # High Availability
+        # Metrics Server can be installed in high availability mode directly from a YAML 
+        # manifest or via the official Helm chart by setting the replicas value greater 
+        # than 1. To install the latest Metrics Server release in high availability mode 
+        # from the high-availability.yaml manifest, run the following command.
+            # ${KUBECTL} --kubeconfig=${__KUBECONFIG__}  apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability.yaml
+    fi
+    #
+    # check cluster stats and all contexts
+    ${KUBECTL} --kubeconfig=${__KUBECONFIG__} get all -A
+
     # Cluster join command
-printf "\n\n${RED}--Printing join token...${NC}\n\n"
-${KUBEADM} token create --print-join-command
-wait $!
+    printf "\n\n${RED}--Printing join token...${NC}\n\n"
+    ${KUBEADM} token create --print-join-command
+    wait $!
 
-# Kubeadm config 
-${KUBECTL} --kubeconfig=${__KUBECONFIG__} get cm kubeadm-config  \
--n kube-system -o yaml > kubeadm-config.yaml
-# Kube root ca
-${KUBECTL} --kubeconfig=${__KUBECONFIG__}  get configmaps kube-root-ca.crt \
--o yaml > kubeadm-configmap.yaml
+    # Kubeadm config 
+    ${KUBECTL} --kubeconfig=${__KUBECONFIG__} get cm kubeadm-config  \
+    -n kube-system -o yaml > kubeadm-config.yaml
 
-# kubectl get configMap kubeadm-config -o yaml --namespace=kube-system > kubeadm-config.yaml 
-# kubeadm config print init-defaults >> kubeadm-config.yaml 
-# kubeadm config print join-defaults >> kubeadm-config.yaml 
+
+    # kubectl get configMap kubeadm-config -o yaml --namespace=kube-system > kubeadm-config.yaml 
+    # kubeadm config print init-defaults >> kubeadm-config.yaml 
+    # kubeadm config print join-defaults >> kubeadm-config.yaml 
 return 0
 }     # End of init_cluster
 ###############################################################################
@@ -353,13 +421,14 @@ __teardown__
     # Initialize Cluster
 init_cluster
 
+
 exit 0
 }   # END OF RESET
 ###############################################################################
 ###############################################################################
 ######################    TEST THE INPUT PARAMETERS    ########################
 ###############################################################################
-test_input() {
+__test_input__() {
 ###############################################################################
     ## Exit if no paramaters provided
 i=0
@@ -373,7 +442,7 @@ setup, reset or teardown the master node: ";
     sleep 1
     i=$((i++))
     echo "Attempt: ${i}"
-    if [[ "${i}" == 3 ]]; then
+    if [[ "${i}" =~ ^(3)$ ]]; then
             exit 1
     fi
 done
@@ -404,12 +473,41 @@ else
             exit 1
     fi
 
-    test_input
+    __test_input__
 fi
 
-}   # End of test_input
+}   # End of __test_input__
 ###############################################################################
 ###############################################################################
+##########################################################################
+# Create k8s secret from certificate key pair
+__create_k8s_secret__()
+{
+# create a Secret containing a signing key pair in the default namespace:
+kubectl create secret tls dellius-app-ca-tls \
+--cert=/etc/kubernetes/pki/ca.crt \
+--key=/etc/kubernetes/pki/ca.key \
+--namespace=default
+}
+##########################################################################
+# Deploy Cert Manager
+__deploy_cert_manager__()
+{
+# https://docs.cert-manager.io/en/release-0.8/getting-started/install/kubernetes.html
+#  Install the CustomResourceDefinition resources separately
+kubectl apply -f ./cert_manager/00-crds.yaml && \
+# Create a namespace to run cert-manager in
+kubectl create namespace cert-manager && \
+# Disable resource validation on the cert-manager namespace
+kubectl label -n cert-manager certmanager.k8s.io/disable-validation=true && \
+#kubectl label namespace default certmanager.k8s.io/disable-validation=true
+# Install the CustomResourceDefinitions and cert-manager itself
+kubectl apply -f ./cert_manager/cert-manager.yaml -n cert-manager 
+kubectl apply -f ./cert_manager/letsencrypt.yaml -n cert-manager 
+# kubectl apply -f ./cert-manager/cert-manager-crds.yaml
+}
 ###############################################################################
-test_input ${INPUT}
+# echo "${INPUT[0]}"
+# exit 0
+__test_input__ "${INPUT[0]}"
 ###############################################################################

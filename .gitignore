@@ -22,3 +22,9 @@ kubeadm-config.yaml
 kubeconfigmap.yaml
 init.py
 init_os.sh
+cert-ca-config.yaml
+extension-apiserver-authentication.yaml
+kubeadm-config.yaml
+pod-etcd-k8s-master-node.dellius.app.yaml
+test.sh
+cert_manager/letsencrypt.yaml
