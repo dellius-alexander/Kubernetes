@@ -134,29 +134,34 @@ __create_k8s_ssl()
 {
 #export $(cat cert_manager.env | grep -v '#' | awk '/=/ {print $1}')
 # Generate a ca.key with 2048bit:
+mkdir -p "/etc/kubernetes/pki"
 COMMON_NAMES=${@}
 CERT_MANAGER=$(find -type d -name 'cert_manager')
+CERTIFICATES_DIR="/etc/kubernetes/pki"
 echo "CERT-MANAGER: ${CERT_MANAGER}"
 echo "Common Name(s):"  ${COMMON_NAMES}
-openssl genrsa -out "${CERT_MANAGER}/cert/ca.key" 2048 && \
+openssl genrsa -out "${CERTIFICATES_DIR}/ca.key" 2048 && \
 # According to the ca.key generate a ca.crt (use -days to set the certificate 
 # effective time):
-openssl req -x509 -new -nodes -key "${CERT_MANAGER}/cert/ca.key" \
+openssl req -x509 -new -nodes -key "${CERTIFICATES_DIR}/ca.key" \
     -subj "/CN=${COMMON_NAMES}" \
-    -days 365 -out "${CERT_MANAGER}/cert/ca.crt" && \
-# Generate a server.key with 2048bit:
-openssl genrsa -out "${CERT_MANAGER}/cert/server.key" 2048 && \
-# Generate the certificate signing request based on the config file:
-openssl req -new -key "${CERT_MANAGER}/cert/server.key" \
-    -out "${CERT_MANAGER}/cert/server.csr" \
-    -config "${CERT_MANAGER}/csr.conf" && \
-# Generate the server certificate using the ca.key, ca.crt and server.csr:
-openssl x509 -req -in "${CERT_MANAGER}/cert/server.csr" \
-    -CA "${CERT_MANAGER}/cert/ca.crt" -CAkey "${CERT_MANAGER}/cert/ca.key" \
-    -CAcreateserial -out "${CERT_MANAGER}/cert/server.crt" -days 10000 \
-    -extensions v3_ext -extfile "${CERT_MANAGER}/csr.conf" && \
-# View the certificate:
-openssl x509  -noout -text -in "${CERT_MANAGER}/cert/server.crt"
+    -days 365 -out "${CERTIFICATES_DIR}/ca.crt"
+
+
+# # Generate a server.key with 2048bit:
+# openssl genrsa -out "${CERTIFICATES_DIR}/apiserver.key" 2048 && \
+# # Generate the certificate signing request based on the config file:
+# openssl req -new -key "${CERTIFICATES_DIR}/apiserver.key" \
+#     -out "${CERT_MANAGER}/cert/apiserver.csr" \
+#     -config "${CERT_MANAGER}/csr.conf" && \
+# # Generate the server certificate using the ca.key, ca.crt and server.csr:
+# openssl x509 -req -in "${CERT_MANAGER}/cert/server.csr" \
+#     -CA "${CERTIFICATES_DIR}/ca.crt" -CAkey "${CERTIFICATES_DIR}/ca.key" \
+#     -CAcreateserial -out "${CERTIFICATES_DIR}/apiserver.crt" -days 10000 \
+#     -extensions v3_ext -extfile "${CERT_MANAGER}/csr.conf" && \
+# # View the certificate:
+openssl x509  -noout -text -in "${CERTIFICATES_DIR}/ca.crt"
+
 }
 ###############################################################################
 ###############################################################################
@@ -226,13 +231,13 @@ init_cluster() {
     --control-plane-endpoint="${__MASTER_NODE__}" \
     --apiserver-bind-port="${__KUBERNETES_SERVICE_PORT__}" \
     --apiserver-advertise-address="${__APISERVER_ADVERTISE_ADDRESS__}" \
-    --apiserver-cert-extra-sans="${__MASTER_NODE__}","${__APISERVER_ADVERTISE_ADDRESS__}" \
-    --pod-network-cidr="${__POD_NETWORK_CIDR__}"
+    --apiserver-cert-extra-sans=${__MASTER_NODE__},${__APISERVER_ADVERTISE_ADDRESS__} \
+    --pod-network-cidr="${__POD_NETWORK_CIDR__}" 
 
     wait $!
 
     # View the certificate:
-    openssl x509  -noout -text -in "/etc/kubernetes/pki/server.crt"
+    openssl x509  -noout -text -in "/etc/kubernetes/pki/apiserver.crt"
 
     # Setup KUBECONFIG file:
     mkdir -p ${__KUBECONFIG_DIRECTORY__} 
@@ -295,7 +300,9 @@ init_cluster() {
     #
     # check cluster stats and all contexts
     ${KUBECTL} --kubeconfig=${__KUBECONFIG__} get all -A
-
+    # print configuration
+    ${KUBEADM} config print init-defaults > kubeadm-init-defaults.yaml
+    ${KUBEADM} config print join-defaults > kubeadm-join-defaults.yaml
     # Cluster join command
     printf "\n\n${RED}--Printing join token...${NC}\n\n"
     ${KUBEADM} token create --print-join-command
