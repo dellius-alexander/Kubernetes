@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -e
 ###############################################################################
-## PARAMETERS: [ start | stop | reset ]
+## PARAMETERS: [ setup | stop | reset ]
 INPUT=${@}
 ###############################################################################
 ###############################################################################
     # Verify kubelet present on host
-KUBEADM=$(command -v kubeadm)
-KUBECTL=$(command -v kubectl)
+KUBEADM=$(command -v kubeadm || echo "")
+KUBECTL=$(command -v kubectl || echo "")
 RED='\033[0;31m' # Red
 NC='\033[0m' # No Color CAP
 ###############################################################################
@@ -35,8 +35,6 @@ else
 fi
     # Checking if environment variables have loaded
 echo "Master Node address: ${__MASTER_NODE__}"
-echo "Worker node 1 address: ${__WORKER_NODE_1__}"
-echo "Worker node 2 address: ${__WORKER_NODE_2__}"
 echo "Kubernetes API Address: ${__APISERVER_ADVERTISE_ADDRESS__}"
 echo "Kubernetes POD CIDR: ${__POD_NETWORK_CIDR__}"
 echo "User Home Directory: ${__USER_HOME__}"
@@ -71,6 +69,8 @@ return 0;
 ###############################################################################
 kube_binary(){
     # Require sudo to run script
+KUBEADM=$(command -v kubeadm)
+KUBECTL=$(command -v kubectl)
 if [[ -z ${KUBEADM} ]]; then
     printf "\nUnable to locate ${RED}kubeadm${NC} binary. \nPlease re-run this script using the ${RED}--setup${NC} flag.\n Usage:${RED} $0 [ --reset | --setup ]${NC}\n";
     printf "\n${RED}sudo $0 $*${NC}";
@@ -137,19 +137,19 @@ __create_k8s_ssl()
 mkdir -p "/etc/kubernetes/pki"
 COMMON_NAMES=${@}
 CERT_MANAGER=$(find -type d -name 'cert_manager')
+mkdir -p ${CERT_MANAGER}/cert
 CERTIFICATES_DIR="/etc/kubernetes/pki"
 echo "CERT-MANAGER: ${CERT_MANAGER}"
 echo "Common Name(s):"  ${COMMON_NAMES}
-openssl genrsa -out "${CERTIFICATES_DIR}/ca.key" 2048 && \
+openssl genrsa -out "${CERTIFICATES_DIR}/ca.key" 4096 && \
 # According to the ca.key generate a ca.crt (use -days to set the certificate 
 # effective time):
 openssl req -x509 -new -nodes -key "${CERTIFICATES_DIR}/ca.key" \
     -subj "/CN=${COMMON_NAMES}" \
     -days 365 -out "${CERTIFICATES_DIR}/ca.crt"
 
-
 # # Generate a server.key with 2048bit:
-# openssl genrsa -out "${CERTIFICATES_DIR}/apiserver.key" 2048 && \
+# openssl genrsa -out "${CERTIFICATES_DIR}/apiserver.key" 4096 && \
 # # Generate the certificate signing request based on the config file:
 # openssl req -new -key "${CERTIFICATES_DIR}/apiserver.key" \
 #     -out "${CERT_MANAGER}/cert/apiserver.csr" \
@@ -159,9 +159,9 @@ openssl req -x509 -new -nodes -key "${CERTIFICATES_DIR}/ca.key" \
 #     -CA "${CERTIFICATES_DIR}/ca.crt" -CAkey "${CERTIFICATES_DIR}/ca.key" \
 #     -CAcreateserial -out "${CERTIFICATES_DIR}/apiserver.crt" -days 10000 \
 #     -extensions v3_ext -extfile "${CERT_MANAGER}/csr.conf" && \
-# # View the certificate:
+# View the certificate:
 openssl x509  -noout -text -in "${CERTIFICATES_DIR}/ca.crt"
-
+return 0
 }
 ###############################################################################
 ###############################################################################
@@ -224,6 +224,7 @@ init_cluster() {
     __create_k8s_ssl "${__HOSTNAME__}" "${__APISERVER_ADVERTISE_ADDRESS__}"
     CERT_MANAGER=$(find -type d -name 'cert_manager')
     echo "CERT-MANAGER: ${CERT_MANAGER}"
+    kube_binary
     # On kmaster
     # Initialize Kubernetes Cluster     # apiserver advertise address     # pod network cidr
     ${KUBEADM} init --cert-dir=/etc/kubernetes/pki \
@@ -327,24 +328,23 @@ __setup() {
 get_env $(find -type f -name 'k8s.env')
 ###############################################################################
     # Install dependencies
-yum install -y git nano net-tools firewalld nfs-utils
-wait $!
+yum install -y git nano net-tools firewalld nfs-utils && \
 
     # Reset IP tables
-iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
+iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X && \
 
     # Pre-requisites: 
     # Update /etc/hosts file So that we can talk to each of the
     # nodes in the cluster. 
-cat $(find ./config -type f -name 'hosts.conf') > /etc/hosts
+cat $(find ./config -type f -name 'hosts.conf') > /etc/hosts && \
 
     # Setup firewall rules
     # Posts to be defined on the worker nodes
     # Run firewall function:
-firewall_rules
+firewall_rules && \
 
     # Disable swap
-swapoff -a && sed -i '/swap/d' /etc/fstab
+swapoff -a && sed -i '/swap/d' /etc/fstab && \
 wait $!
 
     # Disable SELinux
@@ -414,7 +414,7 @@ wait $!
     # Initialize Cluster
 init_cluster
 
-exit 0
+return 0
 }   # END OF SETUP
 ###############################################################################
 ###############################################################################
@@ -429,7 +429,7 @@ __teardown__
 init_cluster
 
 
-exit 0
+return 0
 }   # END OF RESET
 ###############################################################################
 ###############################################################################
@@ -514,7 +514,7 @@ kubectl apply -f ./cert_manager/letsencrypt.yaml -n cert-manager
 # kubectl apply -f ./cert-manager/cert-manager-crds.yaml
 }
 ###############################################################################
-# echo "${INPUT[0]}"
+# echo ${INPUT[0]}
 # exit 0
 __test_input__ "${INPUT[0]}"
 ###############################################################################

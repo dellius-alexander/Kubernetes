@@ -1,0 +1,128 @@
+# https://kubernetes.io/docs/tasks/run-application/run-single-instance-stateful-application/#deploy-mysql
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mysql-sfs
+  labels:
+    app: mysql-sfs
+spec: {}
+status: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-sfs
+  namespace: mysql-sfs
+  labels:
+    app: mysql-sfs
+spec:
+  type: NodePort
+  selector:
+    app: mysql-sfs
+  ports:
+  - port: 3306
+    targetPort: 3306
+    nodePort: 30007
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql-sfs
+  namespace: mysql-sfs
+  labels:
+    app: mysql-sfs
+spec:
+  selector:
+    matchLabels:
+      app: mysql-sfs
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: mysql-sfs
+    spec:
+      containers:
+      - image: mysql:latest
+        name: mysql-sfs
+        env:
+          # Use secret in real usage
+        - name: MYSQL_ROOT_PASSWORD
+          value: developer
+        ports:
+        - containerPort: 3306
+          name: mysql-sfs
+        volumeMounts:
+        - name: mysql-persistent-storage
+          mountPath: /var/lib/mysql
+        - name: my-conf
+          mountPath: /etc/mysql
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+          requests:
+            cpu: 500m
+            memory: 1Gi
+      volumes:
+      - name: mysql-persistent-storage
+        persistentVolumeClaim:
+          claimName: mysql-pv-claim-sfs
+      - name: my-conf
+        configMap:
+          # Provide the name of the ConfigMap containing the files you want
+          # to add to the container
+          name: my-conf
+          items:
+          - key: my.cnf
+            path: my.cnf
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mysql-pv-volume-sfs
+  namespace: mysql-sfs
+  labels:
+    app: mysql-sfs
+    type: local    
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/mnt/mysql_sfs"
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: mysql-pv-claim-sfs
+    namespace: mysql-sfs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pv-claim-sfs
+  namespace: mysql-sfs
+  labels:
+    app: mysql-sfs
+spec:
+  storageClassName: manual
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+data:
+  my.cnf: |
+    [mysqld]
+    secure_file_priv = "/mysql_files"
+kind: ConfigMap
+metadata:
+  name: my-conf
+  namespace: mysql-sfs
+
