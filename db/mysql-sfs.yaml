@@ -121,6 +121,9 @@ spec:
     requests:
       storage: 10Gi
 ---
+# Bind mount local files to remote cluster to be used in a PersistentVolume using rsync.
+# Run the command below:
+# sudo rsync -a -e "ssh -p <PORT>" ./sql/  [USER]@[HOST IP/URL]:/mnt/mysql_sfs/sql 
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -169,5 +172,5 @@ metadata:
   name: my-conf
   namespace: mysql-sfs
 
-# sudo rsync -a -e "ssh -p 22" ./sql/  [USER]@[HOST IP/URL]:/mnt/mysql_sfs/sql 
+
 ---
