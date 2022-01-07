@@ -57,6 +57,8 @@ spec:
           mountPath: /var/lib/mysql
         - name: my-conf
           mountPath: /etc/mysql
+        - name: mysql-files
+          mountPath: /mysql_files
         resources:
           limits:
             cpu: 1000m
@@ -68,6 +70,9 @@ spec:
       - name: mysql-persistent-storage
         persistentVolumeClaim:
           claimName: mysql-pv-claim-sfs
+      - name: mysql-files
+        persistentVolumeClaim:
+          claimName: mysql-pv-claim-sfs-sql
       - name: my-conf
         configMap:
           # Provide the name of the ConfigMap containing the files you want
@@ -93,7 +98,7 @@ spec:
   accessModes:
     - ReadWriteOnce
   hostPath:
-    path: "/mnt/mysql_sfs"
+    path: "/mnt/mysql_sfs/data"
   claimRef:
     apiVersion: v1
     kind: PersistentVolumeClaim
@@ -117,6 +122,44 @@ spec:
       storage: 10Gi
 ---
 apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mysql-pv-volume-sfs-sql
+  namespace: mysql-sfs
+  labels:
+    app: mysql-sfs
+    type: local    
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/mnt/mysql_sfs/sql"
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: mysql-pv-claim-sfs-sql
+    namespace: mysql-sfs
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pv-claim-sfs-sql
+  namespace: mysql-sfs
+  labels:
+    app: mysql-sfs
+spec:
+  storageClassName: manual
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
 data:
   my.cnf: |
     [mysqld]
@@ -126,3 +169,5 @@ metadata:
   name: my-conf
   namespace: mysql-sfs
 
+# sudo rsync -a -e "ssh -p 22" ./sql/  [USER]@[HOST IP/URL]:/mnt/mysql_sfs/sql 
+---
