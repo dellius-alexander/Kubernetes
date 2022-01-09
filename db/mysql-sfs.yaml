@@ -52,6 +52,7 @@ spec:
         ports:
         - containerPort: 3306
           name: mysql-sfs
+          protocol: TCP
         volumeMounts:
         - name: mysql-persistent-storage
           mountPath: /var/lib/mysql
@@ -59,6 +60,9 @@ spec:
           mountPath: /etc/mysql
         - name: mysql-files
           mountPath: /mysql_files
+        # - name: kube-api-access-ktb5n
+        #   mountPath: /var/run/secrets/kubernetes.io/serviceaccount      
+        #   readOnly: true
         resources:
           limits:
             cpu: 1000m
@@ -66,6 +70,9 @@ spec:
           requests:
             cpu: 500m
             memory: 1Gi
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: true
+      nodeName: k8s-master
       volumes:
       - name: mysql-persistent-storage
         persistentVolumeClaim:
@@ -81,6 +88,24 @@ spec:
           items:
           - key: my.cnf
             path: my.cnf
+      # - name: kube-api-access-ktb5n
+      #   projected:
+      #     defaultMode: 420
+      #     sources:
+      #     - serviceAccountToken:
+      #         expirationSeconds: 3607
+      #         path: token
+      #     - configMap:
+      #         items:
+      #         - key: ca.crt
+      #           path: ca.crt
+      #         name: kube-root-ca.crt
+      #     - downwardAPI:
+      #         items:
+      #         - fieldRef:
+      #             apiVersion: v1
+      #             fieldPath: metadata.namespace
+      #           path: namespace
 
 ---
 apiVersion: v1
@@ -171,6 +196,26 @@ kind: ConfigMap
 metadata:
   name: my-conf
   namespace: mysql-sfs
-
+  labels:
+    app: mysql-sfs
 
 ---
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mysql-sfs
+  namespace: mysql-sfs
+  labels:
+    app: mysql-sfs
+spec:
+  maxReplicas: 2
+  minReplicas: 1
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mysql-sfs
+  targetCPUUtilizationPercentage: 25
+status:
+  observedGeneration: 1
+  currentReplicas: 1
+  desiredReplicas: 1

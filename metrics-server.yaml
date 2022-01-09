@@ -145,7 +145,7 @@ spec:
           # - --metric-resolution=15s
           # - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname
           # - --kubelet-use-node-status-port 
-          # - --kubelet-certificate-authority=/cert/ca.crt
+          # - --kubelet-certificate-authority=/cert/client-ca-file
           # - --kubelet-client-certificate=/cert/client.crt
           # - --kubelet-client-key=/cert/client.key
           # - --bind-address=0.0.0.0
@@ -190,28 +190,56 @@ spec:
         volumeMounts:
         - mountPath: /cert
           name: cert-dir
+          readOnly: true
+        # - name: kube-api-access-ktb5n
+        #   mountPath: /var/run/secrets/kubernetes.io/serviceaccount      
+        #   readOnly: true
       nodeSelector:
         kubernetes.io/os: linux
       priorityClassName: system-cluster-critical
       volumes:
       - name: cert-dir
         configMap:
-          name: extension-apiserver-authentication-reader
+          name: ext-apiserver-auth
           items:
+          - key: ca.crt
+            path: ca.crt
           - key: apiserver.crt
             path: apiserver.crt
           - key: apiserver.key
             path: apiserver.key
-          - key: kubeconfig
-            path: kubeconfig
-          - key: ca.crt
-            path: ca.crt
           - key: client.crt
             path: client.crt
           - key: client.key
             path: client.key
-      hostAliases:
-      - ip: "10.0.2.129" 
+          # - key: requestheader-allowed-names
+          #   path: requestheader-allowed-names
+          # - key: requestheader-client-ca-file
+          #   path: requestheader-client-ca-file
+          # - key: requestheader-extra-headers-prefix
+          #   path: requestheader-extra-headers-prefix
+          # - key: requestheader-group-headers
+          #   path: requestheader-group-headers
+          # - key: requestheader-username-headers
+          #   path: requestheader-username-headers
+      # - name: kube-api-access-ktb5n
+      #   projected:
+      #     defaultMode: 420
+      #     sources:
+      #     - serviceAccountToken:
+      #         expirationSeconds: 3607
+      #         path: token
+      #     - configMap:
+      #         items:
+      #         - key: ca.crt
+      #           path: ca.crt
+      #         name: kube-root-ca.crt
+      #     - downwardAPI:
+      #         items:
+      #         - fieldRef:
+      #             apiVersion: v1
+      #             fieldPath: metadata.namespace
+      #           path: namespace
 
 ---
 apiVersion: apiregistration.k8s.io/v1
@@ -229,4 +257,23 @@ spec:
     namespace: kube-system
   version: v1beta1
   versionPriority: 100
-
+---
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: metrics-server
+  namespace: kube-system
+  labels:
+    k8s-app: metrics-server
+spec:
+  maxReplicas: 2
+  minReplicas: 1
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: metrics-server
+  targetCPUUtilizationPercentage: 25
+status:
+  observedGeneration: 1
+  currentReplicas: 1
+  desiredReplicas: 1

@@ -19,6 +19,7 @@ kubectl apply -f ./cert_manager/letsencrypt.yaml -n cert-manager
 ###############################################################################
 ###############################################################################
 # Create k8s ssl certificate key pair
+# https://kubernetes.io/docs/setup/best-practices/certificates/
 __create_k8s_ssl()
 {
 #export $(cat cert-manager.env | grep -v '#' | awk '/=/ {print $1}')
@@ -31,7 +32,7 @@ openssl genrsa -out /etc/kubernetes/pki/ca.key 2048 && \
 openssl req -x509 -new -nodes -key /etc/kubernetes/pki/ca.key -subj "/CN=${COMMON_NAMES}" \
 -days 365 -out /etc/kubernetes/pki/ca.crt && \
 # Generate a server.key with 2048bit:
-openssl genrsa -out c/etc/kubernetes/pki/server.key 2048 && \
+openssl genrsa -out /etc/kubernetes/pki/server.key 2048 && \
 # Generate the certificate signing request based on the config file:
 openssl req -new -key /etc/kubernetes/pki/server.key -out /etc/kubernetes/pki/server.csr -config csr.conf && \
 # Generate the server certificate using the ca.key, ca.crt and server.csr:

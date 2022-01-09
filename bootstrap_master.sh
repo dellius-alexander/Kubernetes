@@ -129,38 +129,84 @@ return 0;
 }   # End of firewall_rules
 ###############################################################################
 ###############################################################################
+# See: https://kubernetes.io/docs/tasks/administer-cluster/certificates/#openssl
+# https://kubernetes.io/docs/tasks/administer-cluster/certificates/
+##########################################################################
+# Create a config file (e.g. csr.conf) for generating a Certificate Signing Request (CSR).
+# # MASTER_IP: is the Common Name (CN) for the CA's new root certificate.
+# The Common Name (AKA CN) represents the server name protected by the SSL
+# certificate. The certificate is valid only if the request hostname matches 
+# the certificate common name. the common name consists of a single host name 
+# (e.g. example.com, www.example.com), or a wildcard name in case of a wildcard
+# certificate (e.g. *.example.com).
+# # MASTER_CLUSTER_IP: is usually the first IP from the service CIDR that is specified as the --service-cluster-ip-range argument for both the API server and the controller manager component.
+##########################################################################
+##### Generate the certificate signing request based on the config file:
+# openssl req -new -key server.key -out server.csr -config csr.conf
+##### Generate the server certificate using the ca.key, ca.crt and server.csr:
+# openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key \
+# -CAcreateserial -out server.crt -days 10000 \
+# -extensions v3_ext -extfile csr.conf
+##########################################################################
 # Create k8s ssl certificate key pair
+# https://kubernetes.io/docs/setup/best-practices/certificates/
 __create_k8s_ssl()
 {
 #export $(cat cert_manager.env | grep -v '#' | awk '/=/ {print $1}')
 # Generate a ca.key with 2048bit:
-mkdir -p "/etc/kubernetes/pki"
+mkdir -p "/etc/kubernetes/pki" "/etc/kubernetes/pki/etcd" "/etc/kubernetes/pki/csr"
 COMMON_NAMES=${@}
 CERT_MANAGER=$(find -type d -name 'cert_manager')
 mkdir -p ${CERT_MANAGER}/cert
 CERTIFICATES_DIR="/etc/kubernetes/pki"
 echo "CERT-MANAGER: ${CERT_MANAGER}"
 echo "Common Name(s):"  ${COMMON_NAMES}
+#--------------------------------------------------------------------
 openssl genrsa -out "${CERTIFICATES_DIR}/ca.key" 4096 && \
 # According to the ca.key generate a ca.crt (use -days to set the certificate 
 # effective time):
 openssl req -x509 -new -nodes -key "${CERTIFICATES_DIR}/ca.key" \
     -subj "/CN=${COMMON_NAMES}" \
     -days 365 -out "${CERTIFICATES_DIR}/ca.crt"
+#--------------------------------------------------------------------
+# Generate a server.key with 2048bit:
+openssl genrsa -out "${CERTIFICATES_DIR}/apiserver.key" 4096 && \
+# Generate the certificate signing request based on the config file:
+openssl req -new -key "${CERTIFICATES_DIR}/apiserver.key" \
+    -out "${CERTIFICATES_DIR}/csr/apiserver.csr" \
+    -config "${CERT_MANAGER}/csr.conf"
 
-# # Generate a server.key with 2048bit:
-# openssl genrsa -out "${CERTIFICATES_DIR}/apiserver.key" 4096 && \
-# # Generate the certificate signing request based on the config file:
-# openssl req -new -key "${CERTIFICATES_DIR}/apiserver.key" \
-#     -out "${CERT_MANAGER}/cert/apiserver.csr" \
-#     -config "${CERT_MANAGER}/csr.conf" && \
-# # Generate the server certificate using the ca.key, ca.crt and server.csr:
-# openssl x509 -req -in "${CERT_MANAGER}/cert/server.csr" \
-#     -CA "${CERTIFICATES_DIR}/ca.crt" -CAkey "${CERTIFICATES_DIR}/ca.key" \
-#     -CAcreateserial -out "${CERTIFICATES_DIR}/apiserver.crt" -days 10000 \
-#     -extensions v3_ext -extfile "${CERT_MANAGER}/csr.conf" && \
+# Generate the server certificate using the ca.key, ca.crt and server.csr:
+openssl x509 -req -in "${CERTIFICATES_DIR}/csr/apiserver.csr" \
+    -CA "${CERTIFICATES_DIR}/ca.crt" -CAkey "${CERTIFICATES_DIR}/ca.key" \
+    -CAcreateserial -out "${CERTIFICATES_DIR}/apiserver.crt" -days 10000 \
+    -extensions v3_ext -extfile "${CERT_MANAGER}/csr.conf"
+#--------------------------------------------------------------------
+# Generate the apiserver-kubelet-client certificate key and cert
+openssl genrsa -out "${CERTIFICATES_DIR}/apiserver-etcd-client.key" 4096 && \
+# Generate the csr for apiserver-kubelet-client
+openssl req -new -key "${CERTIFICATES_DIR}/apiserver-etcd-client.key" \
+    -out "${CERTIFICATES_DIR}/csr/apiserver-etcd-client.csr" \
+    -config "${CERT_MANAGER}/csr.conf"
+# Sign the apiserver-kubelet-client.csr:
+openssl x509 -req -in "${CERTIFICATES_DIR}/csr/apiserver-etcd-client.csr" \
+    -CA "${CERTIFICATES_DIR}/ca.crt" -CAkey "${CERTIFICATES_DIR}/ca.key" \
+    -CAcreateserial -out "${CERTIFICATES_DIR}/apiserver-etcd-client.crt" -days 10000 \
+    -extensions v3_ext -extfile "${CERT_MANAGER}/csr.conf"
+#--------------------------------------------------------------------
+# Generate the apiserver-kubelet-client key and cert
+openssl genrsa -out "${CERTIFICATES_DIR}/apiserver-kubelet-client.key" 4096 && \
+# Generate the csr for apiserver-kubelet-client
+openssl req -new -key "${CERTIFICATES_DIR}/apiserver-kubelet-client.key" \
+    -out "${CERTIFICATES_DIR}/csr/apiserver-kubelet-client.csr" \
+    -config "${CERT_MANAGER}/csr.conf"
+# Sign the apiserver-kubelet-client.csr:
+openssl x509 -req -in "${CERTIFICATES_DIR}/csr/apiserver-kubelet-client.csr" \
+    -CA "${CERTIFICATES_DIR}/ca.crt" -CAkey "${CERTIFICATES_DIR}/ca.key" \
+    -CAcreateserial -out "${CERTIFICATES_DIR}/apiserver-kubelet-client.crt" -days 10000 \
+    -extensions v3_ext -extfile "${CERT_MANAGER}/csr.conf"
 # View the certificate:
-openssl x509  -noout -text -in "${CERTIFICATES_DIR}/ca.crt"
+# openssl x509  -noout -text -in "${CERTIFICATES_DIR}/ca.crt"
 return 0
 }
 ###############################################################################
@@ -221,60 +267,78 @@ return 0;
 ###############################################################################
 init_cluster() {
 ###############################################################################
-    __create_k8s_ssl "${__HOSTNAME__}" "${__APISERVER_ADVERTISE_ADDRESS__}"
+    # __create_k8s_ssl "${__HOSTNAME__}" "${__APISERVER_ADVERTISE_ADDRESS__}"
+    bash ./pki_certs.sh
     CERT_MANAGER=$(find -type d -name 'cert_manager')
+    CERTIFICATES_DIR="/etc/kubernetes/pki"
     echo "CERT-MANAGER: ${CERT_MANAGER}"
     kube_binary
     # On kmaster
     # Initialize Kubernetes Cluster     # apiserver advertise address     # pod network cidr
-    ${KUBEADM} init --cert-dir=/etc/kubernetes/pki \
-    --certificate-key=/etc/kubernetes/pki/ca.key \
+    ${KUBEADM} init phase certs all &&                       # Generate all certificates
+    # ${KUBEADM} init phase certs apiserver &&                 # Generate the certificate for serving the Kubernetes API
+    # ${KUBEADM} init phase certs apiserver-etcd-client &&     # Generate the certificate the apiserver uses to access etcd
+    # ${KUBEADM} init phase certs apiserver-kubelet-client &&  # Generate the certificate for the API server to connect to kubelet
+    # ${KUBEADM} init phase certs ca &&                        # Generate the self-signed Kubernetes CA to provision identities for other Kubernetes components
+    # ${KUBEADM} init phase certs etcd-ca &&                   # Generate the self-signed CA to provision identities for etcd
+    # ${KUBEADM} init phase certs etcd-healthcheck-client &&   # Generate the certificate for liveness probes to healthcheck etcd
+    # ${KUBEADM} init phase certs etcd-peer &&                 # Generate the certificate for etcd nodes to communicate with each other
+    # ${KUBEADM} init phase certs etcd-server &&               # Generate the certificate for serving etcd
+    # ${KUBEADM} init phase certs front-proxy-ca &&            # Generate the self-signed CA to provision identities for front proxy
+    # ${KUBEADM} init phase certs front-proxy-client &&        # Generate the certificate for the front proxy client
+    # ${KUBEADM} init phase certs sa &&                     
+    wait $! 
+    # initialize kubeadm init
+    ${KUBEADM} init --cert-dir="/etc/kubernetes/pki" \
+    --apiserver-advertise-address="${__APISERVER_ADVERTISE_ADDRESS__}" \
+    --certificate-key="${CERTIFICATES_DIR}/ca.key" \
     --control-plane-endpoint="${__MASTER_NODE__}" \
     --apiserver-bind-port="${__KUBERNETES_SERVICE_PORT__}" \
-    --apiserver-advertise-address="${__APISERVER_ADVERTISE_ADDRESS__}" \
-    --apiserver-cert-extra-sans=${__MASTER_NODE__},${__APISERVER_ADVERTISE_ADDRESS__} \
-    --pod-network-cidr="${__POD_NETWORK_CIDR__}" 
-
+    --apiserver-cert-extra-sans=${__HOSTNAME__},${__APISERVER_ADVERTISE_ADDRESS__} \
+    --pod-network-cidr="${__POD_NETWORK_CIDR__}"
     wait $!
-
+        # Copy pki files to cert_manager/cert/ and change permissions
+    cp ${CERTIFICATES_DIR}/* ${CERT_MANAGER}/cert/ -r && 
+    chown -R ${__USER__}:${__USER__} ${CERT_MANAGER} && 
+    wait $!
     # View the certificate:
-    openssl x509  -noout -text -in "/etc/kubernetes/pki/apiserver.crt"
-
+    openssl x509  -noout -text -in "/etc/kubernetes/pki/ca.crt" && 
+    openssl x509  -noout -text -in "/etc/kubernetes/pki/apiserver.crt" && 
+    openssl x509  -noout -text -in "/etc/kubernetes/pki/apiserver-etcd-client.crt" && 
+    wait $! 
     # Setup KUBECONFIG file:
-    mkdir -p ${__KUBECONFIG_DIRECTORY__} 
-    cp -i /etc/kubernetes/admin.conf  ${__KUBECONFIG_DIRECTORY__}/config
-    chown ${__USER__}:${__USER__}  ${__KUBECONFIG_DIRECTORY__}/config
-    wait $!
-
+    mkdir -p ${__KUBECONFIG_DIRECTORY__}  && 
+    cp -i /etc/kubernetes/admin.conf  ${__KUBECONFIG_DIRECTORY__}/config  && 
+    chown ${__USER__}:${__USER__}  ${__KUBECONFIG_DIRECTORY__}/config  && 
+    wait $! 
     # Deploy Calico network
     # Source: https://docs.projectcalico.org/v3.14/manifests/calico.yaml
     # Modify the config map as needed:
-    printf "\n\n${RED}--Deploying Calico Networking...${NC}\n\n"
+    printf "\n\n${RED}--Deploying Calico Networking...${NC}\n\n"  && 
     #${KUBECTL} --kubeconfig=${__KUBECONFIG__} create -f $(find ~+ -type f -name 'calico.yaml')
-    curl -fsSLo ./calico/calico.yaml https://docs.projectcalico.org/manifests/calico.yaml &2>/dev/null
-    ${KUBECTL} --kubeconfig=${__KUBECONFIG__} create -f ./calico/calico.yaml
+    curl -fsSLo ./calico/calico.yaml https://docs.projectcalico.org/manifests/calico.yaml &2>/dev/null 
+    ${KUBECTL} --kubeconfig=${__KUBECONFIG__} create -f ./calico/calico.yaml  && 
     wait $!
-    # Copy pki files to cert_manager/cert/ and change permissions
-    cp /etc/kubernetes/pki/* ./cert_manager/cert/ -r
-    chown -R ${__USER__}:${__USER__} ./cert_manager
+    # # Copy pki files to cert_manager/cert/ and change permissions
+    # cp /etc/kubernetes/pki/* ./cert_manager/cert/ -r
+    # chown -R ${__USER__}:${__USER__} ./cert_manager
     # Metric Server
-    ${KUBECTL} --kubeconfig=${__KUBECONFIG__} create configmap extension-apiserver-authentication-reader -n kube-system  \
+    ${KUBECTL} --kubeconfig=${__KUBECONFIG__} create configmap ext-apiserver-auth -n kube-system  \
     --from-file=apiserver.crt=/etc/kubernetes/pki/apiserver.crt \
     --from-file=apiserver.key=/etc/kubernetes/pki/apiserver.key \
     --from-file=ca.crt=/etc/kubernetes/pki/ca.crt \
     --from-file=client.crt=/etc/kubernetes/pki/apiserver-kubelet-client.crt \
-    --from-file=client.key=/etc/kubernetes/pki/apiserver-kubelet-client.key \
-    --from-file=kubeconfig=/home/dalexander/.kube/config -o yaml > extension-apiserver-authentication.yaml  # create configmap extension-apiserver-authentication-reader
-    #
-    CONFIG_MAP=$(find ~+ -type f -name 'extension-apiserver-authentication')
-    #
-        ${KUBECTL} --kubeconfig=${__KUBECONFIG__} taint nodes --all \
-        node-role.kubernetes.io/master-
-        #
+    --from-file=client.key=/etc/kubernetes/pki/apiserver-kubelet-client.key -o yaml > extension-apiserver-authentication.yaml  && 
+    wait $!
+    CONFIG_MAP=$(find ~+ -type f -name 'extension-apiserver-authentication')  && 
+    wait $!
+    ${KUBECTL} --kubeconfig=${__KUBECONFIG__} taint nodes --all node-role.kubernetes.io/master-  && 
+    wait $!
     if [[ -f "${CONFIG_MAP}" ]]; then
         printf "\n\n${RED}--Deploying Metric Server Daemonset...${NC}\n\n"
         ${KUBECTL} --kubeconfig=${__KUBECONFIG__}  apply -f \
         ${CONFIG_MAP}
+        wait $!
         ${KUBECTL} --kubeconfig=${__KUBECONFIG__}  apply -f \
         $(find ~+ -type f -name 'metrics-server.yaml')
         wait $!
@@ -290,6 +354,7 @@ init_cluster() {
         # https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
         ${KUBECTL} --kubeconfig=${__KUBECONFIG__}  apply -f \
         $(find ~+ -type f -name 'metrics-server.yaml')
+        wait $!
         #####################################################################
         # High Availability
         # Metrics Server can be installed in high availability mode directly from a YAML 
@@ -300,8 +365,10 @@ init_cluster() {
     fi
     #
     # check cluster stats and all contexts
+    printf "\n\n${RED}--Showing Cluster Details...${NC}\n\n"
     ${KUBECTL} --kubeconfig=${__KUBECONFIG__} get all -A
     # print configuration
+    printf "\n\n${RED}--Printing [init|join]-defaults ...${NC}\n\n"
     ${KUBEADM} config print init-defaults > kubeadm-init-defaults.yaml
     ${KUBEADM} config print join-defaults > kubeadm-join-defaults.yaml
     # Cluster join command
@@ -404,6 +471,13 @@ EOF
 
     # Install Kubernetes components
 yum install -y kubelet kubeadm kubectl --disableexcludes=kubernetes
+# Bash Completion
+# https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/#introduction
+# $: source /usr/share/bash-completion/bash_completion
+# $: echo 'source <(kubectl completion bash)' >>~/.bashrc
+# $: kubectl completion bash >/etc/bash_completion.d/kubectl
+# $: echo 'alias k=kubectl' >>~/.bashrc
+# $: echo 'complete -F __start_kubectl k' >>~/.bashrc
 wait $!
 
     # Enable and Start kubelet service

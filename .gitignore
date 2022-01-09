@@ -31,3 +31,6 @@ cert_manager/letsencrypt.yaml
 apiServerCertSANs.yaml
 kubeadm-*-defaults.yaml
 master-config.yaml
+ext-api-auth-configmap.yaml
+ext-api-auth-configmap.yaml
+ext_apiserver_auth.sh

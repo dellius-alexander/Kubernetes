@@ -73,7 +73,7 @@ CERT_MANAGER=$(find -type d -name 'cert_manager')
     # Initialize Kubernetes Cluster
     ${KUBEADM} init \
         # # # # private key file
-        --proxy-client-key-file \
+        --proxy-client-key-file= \
         # # # # signed client certificate file
         --proxy-client-cert-file \
         # # # # certificate of the CA that signed the client certificate file
@@ -146,6 +146,26 @@ exit 0
     #   addon              Install required addons for passing conformance tests
     #   bootstrap-token    Generates bootstrap tokens used to join a node to a cluster
     #   certs              Certificate generation
+        # This command is not meant to be run on its own. See list of available subcommands.
+
+        # Usage:
+        # kubeadm init phase certs [flags]
+        # kubeadm init phase certs [command]
+
+        # Available Commands:
+        # all                      Generate all certificates
+        # apiserver                Generate the certificate for serving the Kubernetes API
+        # apiserver-etcd-client    Generate the certificate the apiserver uses to access etcd
+        # apiserver-kubelet-client Generate the certificate for the API server to connect to kubelet
+        # ca                       Generate the self-signed Kubernetes CA to provision identities for other Kubernetes components
+        # etcd-ca                  Generate the self-signed CA to provision identities for etcd
+        # etcd-healthcheck-client  Generate the certificate for liveness probes to healthcheck etcd
+        # etcd-peer                Generate the certificate for etcd nodes to communicate with each other
+        # etcd-server              Generate the certificate for serving etcd
+        # front-proxy-ca           Generate the self-signed CA to provision identities for front proxy
+        # front-proxy-client       Generate the certificate for the front proxy client
+        # sa                       Generate a private key for signing service account tokens along with its public key
+
     #   control-plane      Generate all static Pod manifest files necessary to establish the control plane
     #   etcd               Generate static Pod manifest file for local etcd
     #   kubeconfig         Generate all kubeconfig files necessary to establish the control plane and the admin kubeconfig file
@@ -212,3 +232,20 @@ exit 0
 #   -v, --v Level                  number for the log level verbosity
 
 # Use "kubeadm init [command] --help" for more information about a command.
+
+
+
+#####################################################################
+    # ${KUBEADM} init --cert-dir="/etc/kubernetes/pki" \
+    # # --proxy-client-key-file="${CERT_MANAGER}/cert/front-proxy-client.key" \
+    # # --proxy-client-cert-file="${CERT_MANAGER}/cert/front-proxy-client.crt" \
+    # # --requestheader-client-ca-file="${CERTIFICATES_DIR}/ca.crt"  \
+    # # --requestheader-allowed-names="${__HOSTNAME__}","${__MASTER_NODE__}" \
+    # --apiserver-advertise-address="${__APISERVER_ADVERTISE_ADDRESS__}" \
+    # --certificate-key="${CERTIFICATES_DIR}/ca.key" \
+    # --control-plane-endpoint="${__MASTER_NODE__}" \
+    # --apiserver-bind-port="${__KUBERNETES_SERVICE_PORT__}" \
+    # --apiserver-advertise-address="${__APISERVER_ADVERTISE_ADDRESS__}" \
+    # --apiserver-cert-extra-sans=${__HOSTNAME__},${__APISERVER_ADVERTISE_ADDRESS__} \
+    # # pod network cidr
+    # --pod-network-cidr="${__POD_NETWORK_CIDR__}" 
