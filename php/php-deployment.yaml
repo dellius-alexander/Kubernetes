@@ -1,0 +1,328 @@
+# https://kubernetes.io/docs/tasks/run-application/run-single-instance-stateful-application/#deploy-mysql
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: php-dev
+  labels:
+    app: php-dev
+spec: {}
+status: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: php-dev
+  namespace: php-dev
+  labels:
+    app: php-dev
+spec:
+  type: NodePort
+  selector:
+    app: php-dev
+  ports:
+  - name: php-dev-http
+    port: 80
+    targetPort: 80
+    nodePort: 30080
+  - name: php-dev-https
+    port: 443
+    targetPort: 443
+    nodePort: 30443
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: php-dev
+  namespace: php-dev
+  labels:
+    app: php-dev
+spec:
+  selector:
+    matchLabels:
+      app: php-dev
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: php-dev
+    spec:
+      containers:
+      # - image: mcr.microsoft.com/vscode/devcontainers/php:0-7.4
+      - image: php:7.4.18-apache-dev
+        name: php-dev
+        command: ["sh", "-c"]
+        args:
+        - php -S 0.0.0.0:80 -t /var/www/html
+        # - apt-get update && export DEBIAN_FRONTEND=noninteractive && 
+        #   apt-get install -y mariadb-client &&
+        #   apt-get -y install --no-install-recommends sendmail
+        env:
+          # Edit PHP configuration
+        - name: APACHE_RUN_DIR
+          value: /var/www/html
+        # - name:  APACHE_LOG_DIR
+        #   value: /var/log
+        # - name: PHP_DOCUMENT_ROOT
+        #   value: /assets/manual
+        # - name: PHP_DOCUMENT_ROOT
+        #   value: /var/www/html
+        # - name: PHP_INI_DIR
+        #   value: /php_ini
+        ports:
+        - containerPort: 80
+          name: php-dev-http
+          protocol: TCP
+        - containerPort: 443
+          name: php-dev-https
+          protocol: TCP
+        volumeMounts:
+        - name: php-dev-persistent-storage
+          mountPath: /var/www/html
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 250m
+            memory: 256Mi
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: true
+      nodeName: k8s-master
+      volumes:
+      - name: php-dev-persistent-storage
+        persistentVolumeClaim:
+          claimName: php-dev-pvc
+
+---
+# Bind mount local files to remote cluster to be used in a PersistentVolume using rsync.
+# Run the command below:
+# sudo rsync -a -e "ssh -p <PORT>" ./www/  [USER]@[HOST IP/URL]:/mnt/php-dev 
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: php-dev-pv
+  namespace: php-dev
+  labels:
+    app: php-dev
+    type: local    
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: /mnt/php-dev
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: php-dev-pvc
+    namespace: php-dev
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: php-dev-pvc
+  namespace: php-dev
+  labels:
+    app: php-dev
+spec:
+  storageClassName: manual
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+# ---
+# apiVersion: v1
+# data:
+#   setup.sh: |
+#     apt-get update && export DEBIAN_FRONTEND=noninteractive && \
+#     apt-get install -y mariadb-client && \
+#     apt-get -y install --no-install-recommends sendmail 
+# kind: ConfigMap
+# metadata:
+#   name: setup-env
+#   namespace: php-dev
+#   labels:
+#     app: php-dev
+
+---
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: php-dev
+  namespace: php-dev
+  labels:
+    app: php-dev
+spec:
+  maxReplicas: 2
+  minReplicas: 1
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: php-dev
+  targetCPUUtilizationPercentage: 25
+status:
+  observedGeneration: 1
+  currentReplicas: 1
+  desiredReplicas: 1
+
+---
+# mysql service/app
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-sfs
+  namespace: php-dev
+  labels:
+    app: mysql-sfs
+spec:
+  type: NodePort
+  selector:
+    app: mysql-sfs
+  ports:
+  - port: 3306
+    targetPort: 3306
+    nodePort: 30007
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql-sfs
+  namespace: php-dev
+  labels:
+    app: mysql-sfs
+spec:
+  selector:
+    matchLabels:
+      app: mysql-sfs
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: mysql-sfs
+    spec:
+      containers:
+      - image: mysql:8.0.27
+        name: mysql-sfs
+        env:
+          # Use secret in real usage
+        - name: MYSQL_ROOT_PASSWORD
+          value: developer
+        ports:
+        - containerPort: 3306
+          name: mysql-sfs
+          protocol: TCP
+        volumeMounts:
+        - name: mysql-persistent-storage
+          mountPath: /var/lib/mysql
+        # - name: my-conf
+        #   mountPath: /etc/mysql
+        # - name: mysql-files
+        #   mountPath: /mysql_files
+        resources:
+          limits:
+            cpu: 500m
+            memory: 1024Mi
+          requests:
+            cpu: 250m
+            memory: 512Mi
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: true
+      nodeName: k8s-master
+      volumes:
+      - name: mysql-persistent-storage
+        persistentVolumeClaim:
+          claimName: mysql-pv-claim-sfs
+      # - name: mysql-files
+      #   persistentVolumeClaim:
+      #     claimName: mysql-pv-claim-sfs-sql
+      # - name: my-conf
+      #   configMap:
+      #     # Provide the name of the ConfigMap containing the files you want
+      #     # to add to the container
+      #     name: my-conf
+      #     items:
+      #     - key: my.cnf
+      #       path: my.cnf
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mysql-pv-volume-sfs
+  namespace: php-dev
+  labels:
+    app: mysql-sfs
+    type: local    
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/mnt/mysql_sfs/data"
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: mysql-pv-claim-sfs
+    namespace: php-dev
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pv-claim-sfs
+  namespace: php-dev
+  labels:
+    app: mysql-sfs
+spec:
+  storageClassName: manual
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+data:
+  my.cnf: |
+    [mysqld]
+    secure_file_priv = "/mysql_files"
+kind: ConfigMap
+metadata:
+  name: my-conf
+  namespace: php-dev
+  labels:
+    app: mysql-sfs
+
+---
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mysql-sfs
+  namespace: php-dev
+  labels:
+    app: mysql-sfs
+spec:
+  maxReplicas: 2
+  minReplicas: 1
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mysql-sfs
+  targetCPUUtilizationPercentage: 25
+status:
+  observedGeneration: 1
+  currentReplicas: 1
+  desiredReplicas: 1
