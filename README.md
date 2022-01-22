@@ -51,7 +51,7 @@ $ cd kubernetes
 
 The `hosts.conf` file defines the hosts/nodes configuration of your cluster.  List all nodes in your cluster here, as kubernetes will reference these IP Addresses and Domains for networking purposes. This configuration file will replace the `/etc/hosts` file on each node. 
 
-***Warning:*** if this is not a clean/new VM instance, please check the existing `/etc/hosts` file for configured domain listing and add them to this file so these services are not interupted.
+***Warning:*** if this is not a clean/new `VM` instance, please check the existing `/etc/hosts` file for configured domain listing and add them to this file so these services are not interupted.
 
 
 
