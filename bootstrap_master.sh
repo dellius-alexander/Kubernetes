@@ -153,6 +153,7 @@ __create_k8s_ssl(){
 # Create k8s ssl certificate key pair
 # https://kubernetes.io/docs/setup/best-practices/certificates/
 #####################################################################
+# Uncomment the desired api cert
 #--------------------------------------------------------------------
 CERTS=(
 #   ca                          # Generate the self-signed Kubernetes CA to provision identities for other Kubernetes components

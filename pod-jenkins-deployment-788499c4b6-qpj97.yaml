@@ -1,0 +1,160 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    cni.projectcalico.org/containerID: 5dc47b6c42517deba7fd4defda6edcd678ca19c3183418c6822ea9d28767dfe2
+    cni.projectcalico.org/podIP: 192.168.35.134/32
+    cni.projectcalico.org/podIPs: 192.168.35.134/32
+  creationTimestamp: "2021-08-14T17:29:37Z"
+  generateName: jenkins-deployment-788499c4b6-
+  labels:
+    app: jenkins
+    pod-template-hash: 788499c4b6
+  name: jenkins-deployment-788499c4b6-qpj97
+  namespace: jenkins
+  ownerReferences:
+  - apiVersion: apps/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: ReplicaSet
+    name: jenkins-deployment-788499c4b6
+    uid: e1481096-1b0d-4fae-a628-ef62d9ea1571
+  resourceVersion: "32445"
+  uid: b922e55a-8073-4256-8251-9a1a4da14d74
+spec:
+  containers:
+  - env:
+    - name: DOCKER_HOST
+      value: unix:///var/run/docker.sock
+    - name: JAVA_OPTS
+      value: -Xmx2048m -Dhudson.slaves.NodeProvisioner.MARGIN=50 -Dhudson.slaves.NodeProvisioner.MARGIN0=0.85
+    - name: JAVA_ARGS
+      value: -Dorg.apache.commons.jelly.tags.fmt.timeZone=America/New_York
+    - name: JENKINS_UC
+      value: https://updates.jenkins.io/update-center.json
+    - name: KUBECONFIG
+      value: /var/jenkins_home/secrets/kubeconfig
+    - name: JENKINS_PORT
+      value: "-1"
+    - name: JENKINS_HTTPS_LISTEN_ADDRESS
+      value: 127.0.0.1
+    - name: JENKINS_SVC_PORT_443_TCP_ADDR
+      value: 127.0.0.1
+    image: jenkins/jenkins:lts-jdk11
+    imagePullPolicy: Always
+    name: jenkins
+    ports:
+    - containerPort: 50000
+      name: slave
+      protocol: TCP
+    - containerPort: 8080
+      name: http
+      protocol: TCP
+    - containerPort: 443
+      name: https
+      protocol: TCP
+    resources:
+      limits:
+        cpu: 500m
+        memory: 2Gi
+      requests:
+        cpu: 250m
+        memory: 1Gi
+    securityContext:
+      privileged: true
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /var/jenkins_home
+      name: jenkins-data
+    - mountPath: /var/run/docker.sock
+      name: docker-host
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-t8hjt
+      readOnly: true
+  dnsPolicy: ClusterFirst
+  enableServiceLinks: true
+  imagePullSecrets:
+  - name: docker-hub-registry
+  nodeName: k8s-master-node.dellius.app
+  preemptionPolicy: PreemptLowerPriority
+  priority: 0
+  restartPolicy: Always
+  schedulerName: default-scheduler
+  securityContext:
+    runAsUser: 0
+  serviceAccount: jenkins
+  serviceAccountName: jenkins
+  terminationGracePeriodSeconds: 30
+  tolerations:
+  - effect: NoExecute
+    key: node.kubernetes.io/not-ready
+    operator: Exists
+    tolerationSeconds: 300
+  - effect: NoExecute
+    key: node.kubernetes.io/unreachable
+    operator: Exists
+    tolerationSeconds: 300
+  volumes:
+  - name: jenkins-data
+    persistentVolumeClaim:
+      claimName: jenkins-pvc
+  - hostPath:
+      path: /var/run/docker.sock
+      type: ""
+    name: docker-host
+  - name: kube-api-access-t8hjt
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          expirationSeconds: 3607
+          path: token
+      - configMap:
+          items:
+          - key: ca.crt
+            path: ca.crt
+          name: kube-root-ca.crt
+      - downwardAPI:
+          items:
+          - fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+            path: namespace
+status:
+  conditions:
+  - lastProbeTime: null
+    lastTransitionTime: "2021-08-14T17:29:37Z"
+    status: "True"
+    type: Initialized
+  - lastProbeTime: null
+    lastTransitionTime: "2021-08-14T17:30:33Z"
+    status: "True"
+    type: Ready
+  - lastProbeTime: null
+    lastTransitionTime: "2021-08-14T17:30:33Z"
+    status: "True"
+    type: ContainersReady
+  - lastProbeTime: null
+    lastTransitionTime: "2021-08-14T17:29:37Z"
+    status: "True"
+    type: PodScheduled
+  containerStatuses:
+  - containerID: docker://7eb3e69f0c367e0e293552d10fd8c829ade3400e27fd605bce37f83b38a459b7
+    image: jenkins/jenkins:lts-jdk11
+    imageID: docker-pullable://jenkins/jenkins@sha256:1f22f3fb44446f752e1457d9b1612d08dc6a808c267fee3ef0488959be83c2a1
+    lastState: {}
+    name: jenkins
+    ready: true
+    restartCount: 0
+    started: true
+    state:
+      running:
+        startedAt: "2021-08-14T17:30:33Z"
+  hostIP: 10.0.0.128
+  phase: Running
+  podIP: 192.168.35.134
+  podIPs:
+  - ip: 192.168.35.134
+  qosClass: Burstable
+  startTime: "2021-08-14T17:29:37Z"

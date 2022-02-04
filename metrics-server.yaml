@@ -129,20 +129,35 @@ spec:
         k8s-app: metrics-server
     spec:
       serviceAccountName: metrics-server
+      preemptionPolicy: PreemptLowerPriority
+      priority: 0
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: default
+      terminationGracePeriodSeconds: 30
+      tolerations:
+      - effect: NoExecute
+        key: node.kubernetes.io/not-ready
+        operator: Exists
+        tolerationSeconds: 300
+      - effect: NoExecute
+        key: node.kubernetes.io/unreachable
+        operator: Exists
+        tolerationSeconds: 300
       containers:
       - name: metrics-server
         image: k8s.gcr.io/metrics-server/metrics-server:v0.5.2
         imagePullPolicy: IfNotPresent
         args:
-          - --kubelet-insecure-tls    # Needed for single node cluster
-          - --cert-dir=/cert
+          # - --kubelet-insecure-tls    # Needed for single node cluster
+          # - --cert-dir=/cert
           - --secure-port=4443
           - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname
           - --kubelet-use-node-status-port
           - --metric-resolution=15s
           # # USE WHEN --kubelet-insecure-tls is FALSE
           # - --kubeconfig=/cert/kubeconfig
-          # - --metric-resolution=15s
           # - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname
           # - --kubelet-use-node-status-port 
           # - --kubelet-certificate-authority=/cert/client-ca-file
@@ -188,30 +203,50 @@ spec:
           runAsNonRoot: true
           runAsUser: 1000
         volumeMounts:
-        - mountPath: /cert
-          name: cert-dir
+        # - mountPath: /cert
+        #   name: cert-dir
+          # readOnly: true
+        - name: kube-api-access
+          mountPath: /var/run/secrets/kubernetes.io/serviceaccount      
           readOnly: true
-        # - name: kube-api-access-ktb5n
-        #   mountPath: /var/run/secrets/kubernetes.io/serviceaccount      
-        #   readOnly: true
+      enableServiceLinks: true
+      dnsPolicy: ClusterFirst
       nodeSelector:
         kubernetes.io/os: linux
       priorityClassName: system-cluster-critical
       volumes:
-      - name: cert-dir
-        configMap:
-          name: ext-apiserver-auth
-          items:
-          - key: ca.crt
-            path: ca.crt
-          - key: apiserver.crt
-            path: apiserver.crt
-          - key: apiserver.key
-            path: apiserver.key
-          - key: client.crt
-            path: client.crt
-          - key: client.key
-            path: client.key
+        - name: kube-api-access
+          projected:
+            defaultMode: 420
+            sources:
+            - serviceAccountToken:
+                expirationSeconds: 3607
+                path: token
+            - configMap:
+                items:
+                - key: ca.crt
+                  path: ca.crt
+                name: kube-root-ca.crt
+            - downwardAPI:
+                items:
+                - fieldRef:
+                    apiVersion: v1
+                    fieldPath: metadata.namespace
+                  path: namespace
+      # - name: cert-dir
+      #   configMap:
+      #     name: ext-apiserver-auth
+      #     items:
+      #     - key: ca.crt
+      #       path: ca.crt
+      #     - key: apiserver.crt
+      #       path: apiserver.crt
+      #     - key: apiserver.key
+      #       path: apiserver.key
+      #     - key: client.crt
+      #       path: client.crt
+      #     - key: client.key
+      #       path: client.key
           # - key: requestheader-allowed-names
           #   path: requestheader-allowed-names
           # - key: requestheader-client-ca-file
